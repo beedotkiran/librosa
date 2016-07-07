@@ -3,6 +3,32 @@ import scipy.fftpack as fft
 import scipy
 import scipy.signal
 import matplotlib.pyplot as plt
+import scipy.io.wavfile
+import scipy.fftpack as fft_module
+"""
+Paramters for the scattering transform function : 
+    creating wavelet filters : 
+    nOctaves, 
+    bins_per_octave, 
+    quality factor
+
+    calculating scattering : 
+    order 
+    wavelet_filter for each order 
+    averaging window T (fixed over all orders) 
+
+Calculating filters : 
+For any order we shall precalculate all the valid filters.
+This ensues the verification that the : 
+---- Center frequency for wavelet filter(@gamma) for order M+1 > 
+---- Bandwidth of the wavelet filter (@some gamma) for order M.
+
+The specifications psi_specs shall contain a dictionary index by a tuple of 
+valid gammas as shown below and whose values shall be a tuple containing
+the filters center frequency and bandwidth.
+
+psi_spec[(\gamma_1, \gamma_2, .. \gamma_M)] = (centerfrequency_M, bandwidth_M)
+"""
 
 def get_mother_frequency(bins_per_octave):
 
@@ -106,7 +132,6 @@ def create_morlet_1d_bank(psi_specs, N, nOctaves,  bins_per_octave, qualityfacto
     temp = lp[0]
     lp = (lp + lp[::-1]) * .5
     lp[0] = temp
-    lp = 0
     return (psi, phi, lp)
 
 def calculate_convolution(sig, psi, phi, scattering_order):
@@ -125,7 +150,7 @@ def calculate_convolution(sig, psi, phi, scattering_order):
     # maximal length
     log2N = np.log2(len(psi[1]))
     # number of gammas : len(psi)
-    for m in range(1, M + 2):
+    for m in range(1, scattering_order + 2):
         lambda_idx = 1
         #create new dictionary : m+1 th order U signals and mth order S signals
         U[m + 1] = {}
@@ -152,6 +177,8 @@ def plot_filters(psi, phi, lp):
         plt.plot(psi[gamma],'r')
     plt.plot(phi,'b')
     plt.plot(lp,'k')
+    plt.title('lowpass and wavelet filters with Littlewood Paley function')
+    plt.show()
     return
 
 #test scatteering
@@ -161,6 +188,17 @@ bins_per_octave = 1
 qualityfactor = 1
 nOctaves = 12
 N = 2**16
+scattering_order = 1
+
+#load test file from librosa/tests/data/test1_22050.wav
+(sr, y) = scipy.io.wavfile.read('test1_22050.wav');
+# this is a stereofile so averaging the two canals
+y = y.mean(axis=1)
+leny = len(y);
+N = int(np.power(2, np.floor(np.log2(leny)) + 1));
+sig = np.zeros(shape=(N));
+sig[0:leny] = y;
+
 
 assert(nOctaves < np.log2(N))
 
@@ -169,3 +207,5 @@ psi_specs = get_wavelet_filter_specs(bins_per_octave, qualityfactor, nOctaves)
 psi, phi, lp = create_morlet_1d_bank(psi_specs, N, nOctaves, bins_per_octave, qualityfactor)
 
 plot_filters(psi, phi, lp)
+
+S, U = calculate_convolution(sig, psi, phi, scattering_order)
