@@ -17,11 +17,6 @@ Paramters for the scattering transform function :
     wavelet_filter for each order 
     averaging window T (fixed over all orders) 
 
-Calculating filters : 
-For any order we shall precalculate all the valid filters.
-This ensues the verification that the : 
----- Center frequency for wavelet filter(@gamma) for order M+1 > 
----- Bandwidth of the wavelet filter (@some gamma) for order M.
 
 The specifications psi_specs shall contain a dictionary index by a tuple of 
 valid gammas as shown below and whose values shall be a tuple containing
@@ -57,22 +52,42 @@ def get_mother_frequency(bins_per_octave):
     return mother_frequency
 
 
-def get_wavelet_filter_specs(bins_per_octave, qualityfactor, nOctaves):
+def get_wavelet_filter_specs(bins_per_octave, qualityfactor, nOctaves, scattering_order):
 
     """
     Create wavelet filter specs : centerfrequecy, bandwidth at different gammas
+    Wavelet filter specs are independent of the signal length and resolution.
 
     Inputs
     ======
-    bins_per_octave
-    qualityfactor
-    nOctaves
+    bins_per_octave (scalar or list of size scattering_order)
+    qualityfactor (scalar or list of size scattering_order)
+    nOctaves (scalar or list of size scattering order)
+    scattering_order
 
     Outputs
     =======
+    For scattering_order = 1
     psi_specs[gamma] : gamma indexed dictionary that contains the (centerfrequency, bandwidth) tuple
                      : #gammas = bins_per_octave * nOctaves
+    
+    TO BE DONE :
+    For scattering_order = 2
+    psi_specs[(gamma_1, gamma_2)] = (centerfrequency, bandwidth)
+    where (gamma_1 ,gamma_2) corresponds to paths in the scattering transform
+    This generalizes thus for any scattering_order > 1 in the same way.
+    To be sure that we calculate valid wavelet filters in higher orders we check the following condition :
+    
+    xi_1 2^(-\gamma_1/Q1) / Q1 > xi_2 2^(-\gamma_2/Q2)
+    ----------------------------------------------------
+    Bandwidth of the wavelet filter (@some gamma) for order M  > Center frequency for 
+    wavelet filter(@gamma) for order M+1.
+
+    at Q1=Q1=NFO=1 (dyadic) we have xi_1 = xi_2
+    we have \gamma_1 < \gamma_2
+    
     Need to to perform asserts before creating the filters (this)
+    
     """
 
     mother_frequency = get_mother_frequency(bins_per_octave)
@@ -91,7 +106,7 @@ def get_wavelet_filter_specs(bins_per_octave, qualityfactor, nOctaves):
             psi_specs[gamma] = (centerfrequency, bandwidth)
     return psi_specs
 
-def create_morlet_1d_bank(psi_specs, N, nOctaves,  bins_per_octave, qualityfactor):
+def create_morlet_1d_bank(psi_specs, N, nOctaves,  bins_per_octave):
     """
     Function returns morlet 1d wavelet filter bank and Littlewood Paley function
 
@@ -111,20 +126,16 @@ def create_morlet_1d_bank(psi_specs, N, nOctaves,  bins_per_octave, qualityfacto
     """
     #dictionary of wavelet filters
     psi = {}
-    #full resolution
-    N0 = N
 
     for gamma in psi_specs:
         #get the center frequency
-        xi = psi_specs[gamma][0] #0.4 * 2 ** (-j)
-        #get bandwidth : TODO add division by explicit qualityfactor here
-        bandwidth = psi_specs[gamma][1]
-        psi[gamma] = 2 * np.exp(- np.square(np.arange(0, N0, dtype=float) / N - xi) * 10 * np.log(2) / bandwidth ** 2).transpose()
-        bw = xi/qualityfactor #0.4 * 2 ** (-1 + J)
-
-    phi = np.exp(-np.square(np.arange(0, N0,dtype=float)) * 10 * np.log(2) / bw**2 ).transpose()
-
-    # Calculate Littlewood-Paley function
+        xi,bandwidth = psi_specs[gamma]
+        #create filters at full resolution of input signal
+        psi[gamma] = 2 * np.exp(- np.square(np.arange(0, N, dtype=float) / N - xi) * 10 * np.log(2) / bandwidth ** 2).transpose()
+        
+    phi = np.exp(-np.square(np.arange(0, N,dtype=float)) * 10 * np.log(2) / bandwidth**2 ).transpose()
+    
+    # Normalization, compute the Littlewood-Paley sum and adjust it so that the maximum is 2
     lp = np.zeros(shape=(N))
     for gamma in psi:
         lp = lp + 0.5 * np.square(np.abs(psi[gamma]))
@@ -142,25 +153,37 @@ def calculate_convolution(sig, psi, phi, scattering_order):
     psi : wavelet filters dictionary
     phi : low pass filters dictionary
     scattering_order : scattering order (>= 1)
+    
+	for all orders
+		for all signals of previous order:
+			- decompose (wavelet transform, modulus, subsampling)
+			- smooth (low pass, subsampling)
+		end
+	end
+        
+
     TO BE COMPLETED
     """
     U = {}
     U[1] = sig
     S = {}
     # maximal length
-    log2N = np.log2(len(psi[1]))
+#    log2N = np.log2(len(psi[1]))
     # number of gammas : len(psi)
     for m in range(1, scattering_order + 2):
-        lambda_idx = 1
+        print('m=' + repr(m))
+        gamma_idx = 1
         #create new dictionary : m+1 th order U signals and mth order S signals
         U[m + 1] = {}
         sigf = fft_module.fft(U[m])
         for s in range(1, len(U[m]) + 1):
-            if m <= M:
+            if m <= scattering_order:
 
                 for j in range(s, len(psi) + 1):
-                    U[m + 1][lambda_idx] = np.abs(fft_module.ifft(np.multiply(sigf, psi[j])))
-                    lambda_idx = lambda_idx + 1
+                    print(gamma_idx)
+                    U[m + 1][gamma_idx] = np.abs(fft_module.ifft(np.multiply(sigf, psi[j])))
+                    gamma_idx = gamma_idx + 1
+                    #look at the sub-sampling in core-scatt (in scatter-box) and scatnet. should be close
 
         S[m] = np.abs(fft_module.ifft(np.multiply(sigf, phi)))
     return (S, U)
@@ -184,27 +207,27 @@ def plot_filters(psi, phi, lp):
 #test scatteering
 # create mother frequnecy and set of centerfrequency, bandwidth
 # create wavelet filters
-bins_per_octave = 1
-qualityfactor = 1
+bins_per_octave = 2
+qualityfactor = 3
 nOctaves = 12
 N = 2**16
 scattering_order = 1
 
 #load test file from librosa/tests/data/test1_22050.wav
-(sr, y) = scipy.io.wavfile.read('test1_22050.wav');
-# this is a stereofile so averaging the two canals
+(sr, y) = scipy.io.wavfile.read('test1_22050.wav')
+# this is a stereofile so averaging the two channels
 y = y.mean(axis=1)
-leny = len(y);
-N = int(np.power(2, np.floor(np.log2(leny)) + 1));
-sig = np.zeros(shape=(N));
-sig[0:leny] = y;
+leny = len(y)
+N = int(np.power(2, np.floor(np.log2(leny)) + 1))
+sig = np.zeros(shape=(N))
+sig[0:leny] = y
 
 
 assert(nOctaves < np.log2(N))
 
 mother_frequency = get_mother_frequency(bins_per_octave)
-psi_specs = get_wavelet_filter_specs(bins_per_octave, qualityfactor, nOctaves)
-psi, phi, lp = create_morlet_1d_bank(psi_specs, N, nOctaves, bins_per_octave, qualityfactor)
+psi_specs = get_wavelet_filter_specs(bins_per_octave, qualityfactor, nOctaves,scattering_order)
+psi, phi, lp = create_morlet_1d_bank(psi_specs, N, nOctaves, bins_per_octave)
 
 plot_filters(psi, phi, lp)
 
