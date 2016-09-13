@@ -46,3 +46,4 @@ docs/_build/
 
 # Vim
 *.swp
+librosa/core/test1_22050.wav
