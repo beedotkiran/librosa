@@ -157,38 +157,30 @@ def filterbank_morlet_1d(N, psi_specs):
     FWHM_factor = 10 * np.log(2) #fullwidth at half max factor
     
     bandwidth_phi = 0.4 * 2**(-1+len(psi_specs));
-    f = np.arange(0, N, dtype=float) / N # normalized frequency domain
-    
+#    plt.figure()
     for index in psi_specs:
         
         fc, bandwidth_psi = psi_specs[index]
         den = bandwidth_psi**2 / FWHM_factor
         psi[index] = _morlet_1d(N, fc, den)
 #        plt.plot(psi[index])
-        lp = lp + 0.5*np.square(np.abs(psi[index]))
+        lp = lp + np.square(np.abs(psi[index]))
         
-        
+    f = np.arange(0, N, dtype=float) / N # normalized frequency domain        
     phi = np.exp(-np.square(f) * 10 * np.log(2) / bandwidth_phi**2).transpose()
+    
     lp = lp + np.square(np.abs(phi[1]))
-    lp[1::] = (lp[1::] + lp[-1:0:-1]) * 0.5
+    lp[1::] = (lp[1::] + lp[-1:0:-1]) * 0.5    
+        
+    normalizer_lp = np.max(lp)
+
+    for index in psi:
+        psi[index] = psi[index] / normalizer_lp
     
     plt.figure()
     plt.title('LP : Before Normalization')
     plt.plot(lp)
-    
-    J, Q = max(list(psi_specs.keys()))
-    J = J + 1 #number of J is less by 1 than the index
-    
-    for j in range(J):
-        sum_over_qs = 0
-        for q in range(1,Q+1):
-            sum_over_qs = sum_over_qs + np.square(np.abs(psi[(j,q)]))
-        normalizer_lp_j = np.sqrt(max(sum_over_qs)/2)
-        
-        for q in range(1,Q+1):
-            psi[(j,q)] = psi[(j,q)]/normalizer_lp_j
 
-    
     for index in psi_specs:
         lp_afternorm = lp_afternorm + 0.5*np.square(np.abs(psi[index]))
     lp_afternorm = lp_afternorm + np.square(np.abs(phi[1]))
@@ -197,15 +189,6 @@ def filterbank_morlet_1d(N, psi_specs):
     plt.plot(lp_afternorm)
     plt.title('LP : After Normalization')
     #normalize across all filters (j,q) or first normalize within each j (this makes it more flat ?)
-#    lp = lp + np.square(np.abs(phi[1]))
-
-#    lp[1::] = (lp[1::] + lp[-1:0:-1]) * 0.5
-    
-        
-#    normalizer_lp = np.max(lp)
-
-#    for index in psi:
-#        psi[index] = psi[index] / normalizer_lp
         
     filters = dict(phi=phi, psi=psi)
 
@@ -246,12 +229,12 @@ def filterbank_to_multiresolutionfilterbank(filters, max_resolution):
 
     Phi_multires = []
     Psi_multires = []
-    for res in np.arange(0,max_resolution):
+    for res in range(0,max_resolution):
         Phi_multires.append(_get_filter_at_resolution(filters['phi'],res))
 
         aux_filt_psi = np.ndarray((nOctaves, bins_per_octave, int(N/2**res),), dtype='complex64')
-        for j in np.arange(0,nOctaves):
-            for q in np.arange(0,bins_per_octave):
+        for j in range(0,nOctaves):
+            for q in range(0,bins_per_octave):
                 key = (j,q+1)
                 aux_filt_psi[j,q,:] = _get_filter_at_resolution(filters['psi'][key],res)
 
@@ -299,8 +282,9 @@ def _apply_lowpass(x, phi, J, len_x_subsampled):
 
     Returns
     -------
-    XX : ndarray
-        stacked images after being filtered and subsampled
+    x_subsampled : ndarray
+        input signal or stack of signals subsampled to the largest scale 
+        determined by J
     """
     
     x = np.atleast_2d(x)
@@ -430,12 +414,8 @@ def scattering(x,wavelet_filters=None,M=2):
     --------
 
     """
-#    keys_jq = list(filters['psi'].keys())[-1]
-#    J = keys_jq[0] + 1 #nOctaves
-#    Q = keys_jq[1] #bins_per_octave
-#    J = len(wavelet_filters['psi'])
+    
     J, Q, _ = wavelet_filters['psi'][0].shape
-#    Q = int(wavelet_filters['psi'][0].shape[0]/J)
 
     print('--> J = ' + repr(J) + ', Q = ' + repr(Q))
     
@@ -469,11 +449,11 @@ def scattering(x,wavelet_filters=None,M=2):
         S1 = S[1:J*Q+1,:].view()
         S1.shape=(num_order1_coefs,spatial_coefs)
         print('1st Order Coeff. Matrix = ' +repr(S1.shape))
-        X = fft_module.fft(x) # precompute the fourier transform of the images
+        X = fft_module.fft(x) # precompute the fourier transform of the signal
 #        plt.figure()
         indx = 0
         for j in range(J):
-
+            
             filtersj = wavelet_filters['psi'][current_resolution][j].view()
 #            plt.plot(filtersj)
             resolution = max(j-oversample, 0)# resolution for the next layer
@@ -493,6 +473,7 @@ def scattering(x,wavelet_filters=None,M=2):
         plt.imshow(S1, aspect='auto', cmap='hot')
         plt.title('First Order Coeffs')    
         plt.colorbar()
+
     if M > 1: #Second order scattering coeffs
         num_order2_coefs = int(J*(J-1)*Q**2/2)
         S2 = S[J*Q+1:num_coefs, :].view()  # view of the data
@@ -523,6 +504,7 @@ def scattering(x,wavelet_filters=None,M=2):
         plt.imshow(S2, aspect='auto', cmap='hot')
         plt.title('Second Order Coeffs')
         plt.colorbar()
+
     return S, U, S_tree
 
 def get_audio_test():
@@ -563,37 +545,44 @@ def test_scattering(bins_per_octave, quality_factor, nOctaves, N, M):
     """
     
     #Read / Create signals 
-
+    
     # uncomment to test chirp and dirac signals
     (y, fs) = get_audio_test()
-#    y = get_dirac(N, int(N/2))
+#    y = get_dirac(N, int(N/8))
 #    y = get_chirp(N)
-    #    y, sr = librosa.load(librosa.util.example_audio_file())
+#    y, fs = librosa.load(librosa.util.example_audio_file())
        
     x = np.zeros(shape=(N))
     x = y[0:N]
     
     assert(nOctaves < np.log2(N))
     
-    #Librosa's Constant Q Transform 
+    #get specifications for wavelet filters (center frequency, bandwidth)
+    psi_specs = get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves)
+    #create morlet filter bank
+    filters, lp = filterbank_morlet_1d(N, psi_specs)
+    #create multiresolution filterbank 
+    wavelet_filters = filterbank_to_multiresolutionfilterbank(filters, nOctaves)
+    #scattering transform
+    scat,u,scat_tree = scattering(x, wavelet_filters, M=M)
+    coef_index, spatial = scat.shape
+    
     cqts = librosa.cqt(x, sr=fs)
+    mfccs = librosa.feature.mfcc(y=y, sr=fs, n_mfcc=40)
+#    if(display_flag):        
+    #Librosa's Constant Q Transform 
+    
     librosa.display.specshow(librosa.logamplitude(cqts**2, ref_power=np.max),
     		sr=fs, x_axis='time', y_axis='cqt_note')
     plt.colorbar(format='%+2.0f dB')
     plt.title('Constant-Q power spectrum')
     
-    
     #MFCC coefficients
     plt.figure()
-    mfccs = librosa.feature.mfcc(y=y, sr=fs, n_mfcc=40)
     librosa.display.specshow(mfccs, x_axis='time')
     plt.colorbar()
     plt.title('MFCC')
     
-    #get specifications for wavelet filters (center frequency, bandwidth)
-    psi_specs = get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves)
-    #create morlet filter bank
-    filters, lp = filterbank_morlet_1d(N, psi_specs)
     #display little wood payley
     plt.figure()
     plt.plot(lp)
@@ -601,33 +590,26 @@ def test_scattering(bins_per_octave, quality_factor, nOctaves, N, M):
     #this is a bug check for normalization
     plt.xlabel('$\omega$')
     plt.ylabel('Amplitude')
-    #create multiresolution filterbank 
-    wavelet_filters = filterbank_to_multiresolutionfilterbank(filters, nOctaves)
-    #scattering transform
-    scat,u,scat_tree = scattering(x, wavelet_filters, M=M)
-    coef_index, spatial = scat.shape
     
     plt.figure()
     plt.plot(x)
     plt.title('Signal')
-    
-    
+
     plt.figure()
     plt.title('Scattering Transform')
     plt.xlabel('time')
     plt.ylabel('$\lambda$')
-    eps = 1e-16
     #add log to scattering coefficients view better
-    plt.imshow((scat+eps), aspect='auto', cmap='hot')
+    plt.imshow(librosa.logamplitude(scat), aspect='auto', cmap='hot')
     plt.colorbar()
     
     return scat, mfccs, cqts
 
 
     
-test_args = {"bins_per_octave": 12, 
+test_args = {"bins_per_octave": 2, 
              "quality_factor": 1, 
-             "nOctaves":7, 
+             "nOctaves":12, 
              "N":2**16, 
              "M":2
              }
