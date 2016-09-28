@@ -226,9 +226,10 @@ def filterbank_to_multiresolutionfilterbank(filters, max_resolution):
     ------
     filters : dictionary
         Set of filters stored in a dictionary in the following way:
-         - filters['phi'] : Low pass filter (Gaussian) in a 2D vector of size NxN
-         - filters['psi'] : Band pass filter (Morlet) saved as 4D complex array of size [J,L,N,N]
-              where 'J' indexes the scale, 'L; the angles and NxN is the size of a single filter.
+         - filters['phi'] : Low pass filter at resolutions nOctaves to J
+         - filters['psi'] : Band pass filter (Morlet) 
+              where 'j' indexes the scale and 'q' indexes the bins_per_octave 
+              of a single filter.
 
     max_resolution : int
         number of resolutions to compute for every filter (thus for every scale and angle)
@@ -256,9 +257,9 @@ def filterbank_to_multiresolutionfilterbank(filters, max_resolution):
         for j in range(res+1,nOctaves):            
             for q in range(bins_per_octave):
                 key = (j,q)
-                print(key)
+#                print(key)
                 aux_filt_psi[j,q,:] = _get_filter_at_resolution(filters['psi'][key],res)
-        print('')
+#        print('')
         Psi_multires.append(aux_filt_psi)
 
     filters_multires = dict(phi=Phi_multires, psi=Psi_multires)
@@ -364,8 +365,6 @@ def _get_filter_at_resolution(filt,j):
     
     assert _ispow2(N), 'Filter size must be an integer power of 2.'
     
-#    J = int(np.log2(N))
-    
     # Truncation in fourier domain and suming over responses from other bands
     # back into the truncated fourier domain (make sure there are no or 
     # neglible responses in these frequencies, otherwise leads to aliasing)
@@ -375,9 +374,6 @@ def _get_filter_at_resolution(filt,j):
     #truncation by using mask and reshape
     filt_lp = np.complex64(filt*mask)
     
-#    if 'cast' in locals():
-#        filt_lp = cast(filt_lp)
-
     # Remember: C contiguous, last index varies "fastest" (contiguous in
     # memory) (unlike Matlab)
     fold_size = (int(2 ** j), int(N / 2 ** j))
@@ -494,8 +490,8 @@ def scattering(x,wavelet_filters=None,M=2):
         
         for j in range(J):
             filtersj = wavelet_filters['psi'][current_resolution][j].view()
-            resolution = max(j-oversample, 0)# resolution for the next layer
-            v_resolution.append(resolution)
+            resolution = max(j-oversample, 0)
+            v_resolution.append(resolution) # resolution for the next layer
             x_conv = _subsample(fft_module.ifft(Xf*filtersj), resolution ) # q filtered outputs per scale j
             print('j,res = ' + repr((j,resolution))+'--len filters=' + repr(filtersj.shape) + '--filtered siglen = ' + repr(x_conv.shape))
             V.append(x_conv)
@@ -609,7 +605,7 @@ def test_scattering(bins_per_octave, quality_factor, nOctaves, N, M):
     cqts = librosa.cqt(x, sr=fs)
     mfccs = librosa.feature.mfcc(y=y, sr=fs, n_mfcc=40)
     if(display_flag):        
-    #Librosa's Constant Q Transform 
+        #Librosa's Constant Q Transform 
         plt.figure()
         plt.imshow(cqts, aspect='auto',origin='lower')
         plt.colorbar()
@@ -631,10 +627,10 @@ def test_scattering(bins_per_octave, quality_factor, nOctaves, N, M):
 
 
 
-bins_per_octave = 1
-nOctaves = 8
+bins_per_octave = 8
+nOctaves = 10
 N = 2**16
-quality_factor = 1
+quality_factor = 1 #this parameter is never used (remove it)
 M = 1
 
 plt.close('all')
