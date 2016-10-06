@@ -3,17 +3,17 @@ import scipy
 import scipy.signal
 import matplotlib.pyplot as plt
 import scipy.io.wavfile
-import numpy.fft as fft_module
-#import scipy.fftpack as fft_module
+#import numpy.fft as fft_module
+import scipy.fftpack as fft_module
 from scipy.signal import chirp
 import librosa
 
 
 """
 TO DO 
-Check Dirac ouput : higher frequency coefficients still show low values.
+- Check Dirac ouput : higher frequency coefficients still show low values.
+- have to add separate filter bank for 2nd order Q (ususually Q2<Q1)
 
-Use display_flag and print_flag to enable plots and debug prints.
 """
 
 def _ispow2(N):
@@ -24,11 +24,11 @@ def get_mother_frequency(bins_per_octave):
     """
     Function returns the dimensionless mother frequency
 
-    Inputs
-    ------
+    Parameters
+    ----------
     bins_per_octave : Number of Filters per Octave
 
-    Outputs
+    Returns
     -------
     mother_frequency : dimensionaless mother center frequency
 
@@ -54,12 +54,11 @@ def get_mother_frequency(bins_per_octave):
 
 
 def get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves):
-    """
-    Create wavelet filter specs : centerfrequecy, bandwidth at different gammas
+    """Create wavelet filter specs : centerfrequecy, bandwidth at different gammas
     Wavelet filter specs are independent of the signal length and resolution.
 
-    Inputs
-    ------
+    Parameters
+    ----------
     bins_per_octave : (scalar or list of size M)
         number of wavelets per octave in the fourier domain
     quality_factor : (scalar or list of size M)
@@ -69,7 +68,7 @@ def get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves):
     M : scattering order
         the order of scattering transform (max tested = 2)
 
-    Outputs
+    Returns
     -------
 
     psi_specs[gamma] : gamma indexed dictionary that contains the tuple 
@@ -109,13 +108,11 @@ def get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves):
     
     for j in range(nOctaves):
         for q in range(0, bins_per_octave):
-            index = (j,q) #index contains j and q info
             gamma = j * bins_per_octave + q           
-#            print(gamma, index)            
             resolution = np.power(2, -gamma / bins_per_octave)
             centerfrequency = mother_frequency * resolution
             bandwidth = centerfrequency / quality_factor
-            psi_specs[index] = (centerfrequency, bandwidth)
+            psi_specs[(j,q)] = (centerfrequency, bandwidth)
             fc_vec.append(centerfrequency)
             bw_vec.append(bandwidth)
    
@@ -124,13 +121,15 @@ def get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves):
         plt.plot(fc_vec)
         plt.plot(bw_vec)
         plt.title('Normalized bandwidth and center frequencies')
+        plt.xlabel('Filter index')
+        plt.ylabel('Normalized Center Frequency f in [0,1]')
+        plt.legend(('fc','bw'))
         
     return psi_specs
 
 
 def filterbank_morlet_1d(N, psi_specs, nOctaves):
-    """
-    Function returns complex morlet 1d wavelet filter bank 
+    """Function returns complex morlet 1d wavelet filter bank 
 
     Parameters
     ----------
@@ -175,14 +174,14 @@ def filterbank_morlet_1d(N, psi_specs, nOctaves):
     lp = np.zeros(shape=(N)) #little-wood payley   
     lp_afternorm = np.zeros(shape=(N)) #little-wood payley
     FWHM_factor = 10 * np.log(2) #fullwidth at half max factor
-    psi_mat = np.zeros((N,len(psi_specs)))
+#    psi_mat = np.zeros((N,len(psi_specs)))
     
     i = 0
     for index in psi_specs:
         fc, bandwidth_psi = psi_specs[index]
         den = bandwidth_psi**2 / FWHM_factor
         psi[index] = _morlet_1d(N, fc, den)
-        psi_mat[:,i] = psi[index]
+#        psi_mat[:,i] = psi[index]
         i = i + 1
         lp = lp + np.square(np.abs(psi[index]))
     
@@ -195,7 +194,7 @@ def filterbank_morlet_1d(N, psi_specs, nOctaves):
 #        plt.plot(psi[index])
 #    plt.plot(phi)    
 #    plt.figure()
-#    plt.imshow(np.sort(psi_mat), aspect='auto', cmap='jet')
+    
 
     lp = lp + np.square(np.abs(phi[1]))
     lp[1::] = (lp[1::] + lp[-1:0:-1]) * 0.5    
@@ -213,7 +212,7 @@ def filterbank_morlet_1d(N, psi_specs, nOctaves):
     lp_afternorm = lp_afternorm + np.square(np.abs(phi[1]))
     lp_afternorm[1::] = (lp_afternorm[1::] + lp_afternorm[-1:0:-1]) * 0.5
     
-    if(display_flag):        
+    if(0):        
         plt.figure()
         plt.title('Littlewood Payley function')
         plt.plot(lp)
@@ -225,7 +224,7 @@ def filterbank_morlet_1d(N, psi_specs, nOctaves):
     return (filters, lp)
 
 def filterbank_to_multiresolutionfilterbank(filters, max_resolution):
-    """ Converts a filter bank into a multiresolution filterbank
+    """Converts a filter bank into a multiresolution filterbank
     For every filter in the filter bank, compute different resolutions 
     (differnt support). The input filters are assumed to be in the 
     This precalculated Multiresolution filter bank will speed up
@@ -233,8 +232,8 @@ def filterbank_to_multiresolutionfilterbank(filters, max_resolution):
     wavelet filters and different resolutions.
 
 
-    Inputs
-    ------
+    Parameters
+    ----------
     filters : dictionary
         Set of filters stored in a dictionary in the following way:
          - filters['phi'] : Low pass filter at resolutions nOctaves to J
@@ -283,20 +282,21 @@ def filterbank_to_multiresolutionfilterbank(filters, max_resolution):
 #        print('')
 
     filters_multires = dict(phi=Phi_multires, psi=Psi_multires)
+    
     return filters_multires
     
 def _morlet_1d(N, fc, den):
     """Morlet wavelet at center frequency and bandwidth 
     
-    Inputs
-    ------
+    Parameters
+    ----------
     N : integer
         length of filter
     fc : float
         center frequency
     den : denominator of gaussian with sigma**2
     
-    Outputs
+    Returns
     -------
     Morlet filter with these parameters of length N
     
@@ -311,7 +311,7 @@ def _apply_lowpass(x, phi, J, len_x_sub):
     Subsampling in time domain to obtain the correct resolution for given 
     number of scattering coeffs len_x_sub.
 
-    Inputs
+    Parameters
     ----------
     x : array_like
         Input signal in the spatial domain.
@@ -322,7 +322,7 @@ def _apply_lowpass(x, phi, J, len_x_sub):
     n_scat : int
         number of spatial coefficients of the scattering vector
 
-    Outputs
+    Returns
     -------
     x_subsampled : ndarray
         input signal or stack of signals subsampled to the largest scale 
@@ -338,36 +338,17 @@ def _apply_lowpass(x, phi, J, len_x_sub):
     
     for q in range(x.shape[0]):
         xf = fft_module.fft(x[q,:])
-        x_filtered = np.real(fft_module.ifft(xf*phi))
+        x_filtered = fft_module.ifft(xf*phi)
         x_sub[q,:] = 2 ** (J - 1) * x_filtered[::ds]
     
     return x_sub
         
-    
-def _subsample(X,j):
-    """Subsampling in time by factor 2**j
-
-    Parameters
-    ----------
-    X : array_lie
-        input signal
-    j : int
-        rate of subsampling is 2**j
-
-    Returns
-    -------
-    subsampled signal
-    """
-
-    dsf = 2**j
-    
-    return dsf*X[::dsf]
 
 def _get_filter_at_resolution(filt,j):
     """Computes filter 'filt' at resolution 'j'
     
-    Inputs
-    ------
+    Parameters
+    ----------
     filt : array
         Filter in the Fourier domain.
     j : int
@@ -411,18 +392,16 @@ def _get_filter_at_resolution(filt,j):
 def scattering(x,wavelet_filters=None,M=2):
     """Compute the scattering transform of a signal using the filter bank.
 
-    Notes
-    -----
-    Input signallength needs to be a power of 2. This needs to be taken 
-    care of outside this function.    
     
     Parameters
     ----------
     x : array_like
         input signal 
+        Length of x needs to be a power of 2. 
+
     wavelet_filters : Dictionary 
         Multiresolution wavelet filter bank 
-    m : int
+    M : int
         Order of the scattering transform, which can be 0, 1 or 2.
 
 
@@ -444,7 +423,7 @@ def scattering(x,wavelet_filters=None,M=2):
     S_tree[((j1,q1),(j2,q2))] : 2nd-order for scale 'j1', bin 
     'q1' on the first layer, and 'j2', 'q2' in the second layer.
 
-    The number of coefficients for each entry is (num_coefs,spatial_coefs)
+    The number of coefficients for each entry is (num_coefs,window_size)
 
     References
     ----------
@@ -459,22 +438,27 @@ def scattering(x,wavelet_filters=None,M=2):
 
     """
     
-    if(wavelet_filters==None):#build filters with size length(x)
+    if(wavelet_filters==None):#build filters 
         N = len(x)        
-        nOctaves = int(np.log2(len(x)))-4
-        bins_per_octave = 2 #default value of Q
-        quality_factor = 1#default value of quality factor
-        #get specifications for wavelet filters (center frequency, bandwidth)
-        psi_specs = get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves)
-        #create morlet filter bank
+        nOctaves = int(np.log2(len(x)))-1
+        bins_per_octave = 2 
+        quality_factor = 1
+        
+        psi_specs = get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves)        
         filters, lp = filterbank_morlet_1d(N, psi_specs, nOctaves)
-        #create multiresolution filterbank 
         wavelet_filters = filterbank_to_multiresolutionfilterbank(filters, nOctaves)
     
-#    J, Q, _ = wavelet_filters['psi'][0].shape
+    if(debug_flag):
+        #there are no truncated filters; checked at all resolutions 
+        for key in wavelet_filters['psi']:
+            plt.figure()
+            plt.title('Key='+repr(key))
+            for res in wavelet_filters['psi'][key]:
+                plt.plot(wavelet_filters['psi'][key][res])
+            
     keys_jq = max(list(wavelet_filters['psi'].keys()))
-    J = keys_jq[0] + 1 #nOctaves
-    Q = keys_jq[1] + 1#bins_per_octave
+    J = keys_jq[0] + 1 
+    Q = keys_jq[1] + 1
         
     num_coefs = {
         0: int(1),
@@ -482,13 +466,13 @@ def scattering(x,wavelet_filters=None,M=2):
         2: int(1 + J * Q + J * (J - 1) * Q**2 / 2)
     }.get(M, -1)
 
-    spatial_coefs = int(x.shape[0]/2**(J-1)) #number of coeffecients in time
+    window_size = int(x.shape[0]/2**(J-1)) #number of coeffecients in time
     
     if(print_flag):
         print('--> J = ' + repr(J) + ', Q = ' + repr(Q))
         print('# of Filters = J*Q' + repr(J*Q))
         print('# Scattering Coeffs='+repr(num_coefs))
-        print('# Time window size = ' + repr(spatial_coefs))
+        print('# Time window size = ' + repr(window_size))
     
     oversample = 1  # subsample at a rate a bit lower than the critic frequency
 
@@ -497,36 +481,64 @@ def scattering(x,wavelet_filters=None,M=2):
     v_resolution = []
     current_resolution = 0
     
-    S = np.zeros((num_coefs,spatial_coefs)) #create matrix containing num_coeffs x window length 
+    S = np.zeros((num_coefs,window_size)) #create matrix containing num_coeffs x window length 
     S_tree = {} #allows access to the coefficients (S) using the tree structure
 
-    S[0, :] = _apply_lowpass(x, wavelet_filters['phi'][current_resolution], J,  spatial_coefs)[0] #first coefficient
+    S[0, :] = _apply_lowpass(x, wavelet_filters['phi'][current_resolution], J,  window_size)[0] #first coefficient
     S_tree[0] = S[0, :]
 
     
     if M > 0: #First order scattering coeffs
         num_order1_coefs = J*Q
         S1 = S[1:J*Q+1,:].view()
-        S1.shape=(num_order1_coefs,spatial_coefs)
-#        print('1st Order Coeff. Matrix = ' +repr(S1.shape))
+        S1.shape=(num_order1_coefs,window_size)
         Xf = fft_module.fft(x) # precompute the fourier transform of the signal
         indx = 0
         filtmat = np.zeros((J*Q, len( wavelet_filters['psi'][(0,0)][current_resolution])))
+
+        fig, axarr = plt.subplots(J, sharex=True)
+        fig2, axarr2 = plt.subplots(J, sharex=True)
         for j in range(J):
             resolution = max(j-oversample, 0)
             v_resolution.append(resolution) # resolution for the next layer 
             for q in range(Q):
                 filtersjq = wavelet_filters['psi'][(j,q)][current_resolution]
-                x_conv = _subsample(fft_module.ifft(Xf*filtersjq), resolution ) # filtered outputs per j, q 
+                #multiply in fourier and subsample in time
+                ds =  2**resolution
+                
+                if(0): 
+                    #when subsampling removed we have response at higher freq.
+                    #need to be careful about ds. Sensitive.
+                    print('Use no subsampling in lowpass filter nor in signal')
+                    x_conv = fft_module.ifft(Xf*filtersjq) 
+                    resolution = current_resolution
+                else:
+                    x_conv_f = Xf*filtersjq
+                    mask = np.zeros(x_conv_f.shape)
+                    len_x_conv_f = len(x_conv_f)
+                    mask[:int(len_x_conv_f/ds)] = max(np.abs(x_conv_f))
+                    axarr[indx].plot(np.abs(x_conv_f))
+                    axarr[indx].plot(mask,'k--')
+                    axarr[indx].set_title('Mask Length =' + repr(sum(mask>0)))
+                    x_conv_f_truncate = x_conv_f[:int(len_x_conv_f/ds)]
+#                    axarr2[indx].plot(np.abs(x_conv_f_truncate))
+#                    axarr2[indx].set_title('Length =' + repr(len(x_conv_f_truncate)))
+
+                    x_conv2 = fft_module.ifft(x_conv_f_truncate)
+                    x_conv = ds*fft_module.ifft(Xf*filtersjq)[::ds]
+                    diff = np.abs(x_conv2-x_conv)
+                    axarr2[indx].plot(diff)
+                    axarr2[indx].set_title(repr(np.mean(diff)))
+                    print('--j, q, res = ' + repr((j,q,resolution)))
+
                 V.append(x_conv)
                 U.append(np.abs(x_conv))
                 filtmat[indx, :] = np.abs(fft_module.ifft(Xf*filtersjq)) #np.abs(filtersj) 
-                S1[indx, :] = _apply_lowpass(U[indx], wavelet_filters['phi'][resolution], J, spatial_coefs) #changed index of U here since we evaluate the smoothing
+                S1[indx, :] = _apply_lowpass(U[indx], wavelet_filters['phi'][resolution], J, window_size) #changed index of U here since we evaluate the smoothing
                 if(print_flag):
-#                    print(j*Q + q, indx)
                     print('j,q,res = ' + repr((j,q,resolution))+'--len filters=' + repr(filtersjq.shape) + '--filtered siglen = ' + repr(x_conv.shape) +'--phi_len = ' + repr(len(wavelet_filters['phi'][resolution])) + '--Max='+repr(max(S[indx,:])))
                 indx = indx + 1
-        S_tree[0] = S1
+        S_tree[1] = S1
         
         if(display_flag):
             plt.figure()
@@ -543,22 +555,21 @@ def scattering(x,wavelet_filters=None,M=2):
     if M > 1: #Second order scattering coeffs
         num_order2_coefs = int(J*(J-1)*Q**2/2)
         S2 = S[J*Q+1:num_coefs, :].view()  # view of the data
-        S2.shape = (num_order2_coefs, spatial_coefs)
-#        print('2nd Order Coeff. Matrix  = ' +repr(S2.shape))
+        S2.shape = (num_order2_coefs, window_size)
         indx = 0
         for j1 in range(J):
             #pick resolution of filtered signal stored during U1 calculation.
             current_resolution = v_resolution[j1] 
-            for q1 in range(Q):        
+            for q1 in range(Q):
                 #U is in the time domain                
                 Ujq = fft_module.fft(U[j1*Q+q1])  
                 for j2 in range(j1+1,J):
-                    for q2 in range(Q):#TODO : have to add separate filter bank for 2nd order Q (ususually Q2<Q1)
+                    for q2 in range(Q):# TODO
                         # | U_lambda1 * Psi_j2 | * phi
                         filtersj2q2 = wavelet_filters['psi'][(j2,q2)][current_resolution].view()
-                        x_conv = np.abs(fft_module.ifft(Ujq*filtersj2q2))
-                        # computing all Q subbands of scale j2 at once                
-                        Uj2 = _apply_lowpass(x_conv, wavelet_filters['phi'][current_resolution], J,  spatial_coefs)
+                        #why no subsampling here ?? while we do it in 1st order 
+                        x_conv = np.abs(fft_module.ifft(Ujq*filtersj2q2))               
+                        Uj2 = _apply_lowpass(x_conv, wavelet_filters['phi'][current_resolution], J,  window_size)
                         if(print_flag):
                             print('j1,q1,j2,q2,res :' + repr((j1,q1,j2,q2,resolution)) + 'Uj2:'+repr(Uj2.shape) + 'x_conv=' + repr(x_conv.shape))
                         S2[indx, :] = Uj2
@@ -598,8 +609,8 @@ def get_dirac(N, loc):
     
 def test_scattering(bins_per_octave, quality_factor, nOctaves, N, M):
     """Test scattering transform 
-    Inputs
-    ------
+    Parameters
+    ----------
     bins_per_octave : integer
         Number of wavelet filters per octave in the fourier domain.
     quality_factor : integer
@@ -616,8 +627,8 @@ def test_scattering(bins_per_octave, quality_factor, nOctaves, N, M):
     #Read / Create signals 
     
     # uncomment to test chirp and dirac signals
-    (y, fs) = get_audio_test()
-#    y = get_dirac(N, int(N/8))
+#    (y, fs) = get_audio_test()
+    y = get_dirac(N, int(N/8))
 #    y = get_chirp(N)
 #    y, fs = librosa.load(librosa.util.example_audio_file())
        
@@ -626,46 +637,49 @@ def test_scattering(bins_per_octave, quality_factor, nOctaves, N, M):
     
     assert(nOctaves < np.log2(N))
     
-    #get specifications for wavelet filters (center frequency, bandwidth)
-    psi_specs = get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves)
-    #create morlet filter bank
-    filters, lp = filterbank_morlet_1d(N, psi_specs, nOctaves)
-    #create multiresolution filterbank 
-    wavelet_filters = filterbank_to_multiresolutionfilterbank(filters, nOctaves)
     #scattering transform
+    psi_specs = get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves)
+    filters, lp = filterbank_morlet_1d(N, psi_specs, nOctaves)
+    wavelet_filters = filterbank_to_multiresolutionfilterbank(filters, nOctaves)
     scat,u,scat_tree = scattering(x, wavelet_filters=wavelet_filters, M=M)
     coef_index, spatial = scat.shape
     
+    #CQTs and MFCCs
     cqts = librosa.cqt(x, sr=fs)
-    mfccs = librosa.feature.mfcc(y=y, sr=fs, n_mfcc=40)
+#    mfccs = librosa.feature.mfcc(y=y, sr=fs)
+    
+    
     if(display_flag):        
         #Librosa's Constant Q Transform 
         plt.figure()
         plt.imshow(cqts, aspect='auto',origin='lower')
         plt.colorbar()
         plt.title('Constant-Q power spectrum')
+        plt.xlabel('Time windows')
+        plt.ylabel('Log Freq.')
         
         plt.figure()
         plt.plot(x)
         plt.title('Signal')
+        plt.xlabel('Time')
+        plt.ylabel('Amplitude')
     
-        plt.figure()
-        plt.title('Scattering Transform')
-        plt.xlabel('time')
-        plt.ylabel('$\lambda$')
-        #add log to scattering coefficients view better
-        plt.imshow(np.log2(scat+1e-6), aspect='auto', cmap='jet')
-        plt.colorbar()
+#        plt.figure()
+#        plt.title('Scattering Transform')
+#        plt.xlabel('time')
+#        plt.ylabel('$\lambda$')
+#        plt.imshow(np.log2(scat+1e-6), aspect='auto', cmap='jet')#add log to scattering coefficients view better
+#        plt.colorbar()
     
     return scat, mfccs, cqts
 
 
 
-bins_per_octave = 12
-nOctaves = 7
+bins_per_octave = 1
+nOctaves = 12
 N = 2**16
 quality_factor = 1 #this parameter is never used (remove it)
-M = 2
+M = 1
 
 plt.close('all')
 
@@ -682,16 +696,9 @@ display_flag = 1
 debug_flag = 0
 print_flag =  0
 
-psi_specs = get_wavelet_filter_specs(bins_per_octave, 1, nOctaves)
-filters, lp = filterbank_morlet_1d(N, psi_specs, nOctaves)
-wavelet_filters = filterbank_to_multiresolutionfilterbank(filters, nOctaves)
+#psi_specs = get_wavelet_filter_specs(bins_per_octave, 1, nOctaves)
+#filters, lp = filterbank_morlet_1d(N, psi_specs, nOctaves)
+#wavelet_filters = filterbank_to_multiresolutionfilterbank(filters, nOctaves)
 scat, mfccs, cqts = test_scattering(**test_args)
 
-if(debug_flag):
-    #there are no truncated filters; checked at all resolutions 
-    for key in wavelet_filters['psi']:
-        plt.figure()
-        plt.title('Key='+repr(key))
-        for res in wavelet_filters['psi'][key]:
-            plt.plot(wavelet_filters['psi'][key][res])
             
