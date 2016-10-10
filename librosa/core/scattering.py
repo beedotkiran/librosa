@@ -213,7 +213,7 @@ def filterbank_morlet_1d(N, psi_specs, nOctaves):
     lp_afternorm = lp_afternorm + np.square(np.abs(phi[1]))
     lp_afternorm[1::] = (lp_afternorm[1::] + lp_afternorm[-1:0:-1]) * 0.5
     
-    if(0):        
+    if(display_flag):        
         plt.figure()
         plt.title('Littlewood Payley function')
         plt.plot(lp)
@@ -341,10 +341,10 @@ def _apply_lowpass(x, phi, J, len_x_sub):
     x = np.atleast_2d(x)
         
     x_sub = np.zeros((x.shape[0], len_x_sub))
-    
     len_x = x.shape[1]
-    ds = len_x//len_x_sub
-    factor = 2 ** (J - 1)
+    ds = len_x//len_x_sub #eq N/2**j // N/2**(J-1) = 2**(J-1-j)
+    #factor = 2 ** (J - 1) #this is the wrong factor
+    #multiplication factor ds depends on the resolution & subsampling required
     for q in range(x.shape[0]):
         xf = fft_module.fft(x[q,:])
         x_filtered = np.abs(fft_module.ifft(xf*phi))
@@ -449,9 +449,9 @@ def scattering(x,wavelet_filters=None,M=2):
     
     if(wavelet_filters==None):#build filters 
         N = len(x)        
-        nOctaves = int(np.log2(len(x)))-1
-        bins_per_octave = 2 
-        quality_factor = 1
+        nOctaves = 7 #int(np.log2(len(x)))-1
+        bins_per_octave = 12 #defaults 
+        quality_factor = 4 #defaults
         
         psi_specs = get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves)        
         filters, lp = filterbank_morlet_1d(N, psi_specs, nOctaves)
@@ -504,55 +504,62 @@ def scattering(x,wavelet_filters=None,M=2):
         Xf = fft_module.fft(x) # precompute the fourier transform of the signal
         indx = 0
         filtmat = np.zeros((J*Q, len( wavelet_filters['psi'][(0,0)][current_resolution])))
-
-        fig, axarr = plt.subplots(J, sharex=True)
-        fig2, axarr2 = plt.subplots(J, sharex=True)
-        fig3, axarr3 = plt.subplots(J, sharex=True)
+        
+        if(Q==1 and display_flag): 
+        #display only when Q =1 otherwise too many signals to plot    
+            fig, axarr = plt.subplots(J, sharex=True)
+            fig2, axarr2 = plt.subplots(J, sharex=True)
+            fig3, axarr3 = plt.subplots(J, sharex=True)
+    
+            fig.suptitle("Filtered Signals and their Mask for fourier Truncation (Fourier Domain)", fontsize=14)
+            fig2.suptitle("Low pass filters with their non-zero support (Fourier Domain)", fontsize=14)
+            fig3.suptitle("Filtered signal and its absolute value (Time domain)", fontsize=14)
         
         for j in range(J):
             resolution = max(j-oversample, 0)
             v_resolution.append(resolution) # resolution for the next layer 
             for q in range(Q):
                 filtersjq = wavelet_filters['psi'][(j,q)][current_resolution]
-                #multiply in fourier and subsample in time
+                #Fourier truncate eqs subsample in time
                 ds =  2**resolution
                 x_conv_f = Xf*filtersjq
                 
                 if(no_subsample_flag): 
-                    #when subsampling is removed we have response at higher freq. for dirac input
-                    #need to be careful about ds. Sensitive.
                     print('Use no subsampling in lowpass filter nor in signal')
                     x_conv = fft_module.ifft(x_conv_f) 
                     resolution = current_resolution
                 else:
                     mask = np.zeros(x_conv_f.shape)
                     len_x_conv_f = len(x_conv_f)
-                    mask[:int(len_x_conv_f/ds)] = max(np.abs(x_conv_f))
+                    mask[:len_x_conv_f//ds] = max(np.abs(x_conv_f))
                     x_conv_f_truncate = x_conv_f[:len_x_conv_f//ds]
                     x_conv = fft_module.ifft(x_conv_f_truncate)
-                    x_conv_time_sub = ds*fft_module.ifft(Xf*filtersjq)[::ds]
-                    diff = np.mean(np.abs(x_conv_time_sub-x_conv))
-                    disp_str = '-->j, q, res = ' + repr((j,q,resolution)) + '-F_trunc. - T_subsample diff=' + repr(diff)
-                    disp_str2 = '--phi_len = ' + repr(len(wavelet_filters['phi'][resolution])) + '--Max='+repr(max(S[indx,:]))
-                    print(disp_str + disp_str2)
-                    if(Q==1):
+                    x_conv_time_sub = ds*fft_module.ifft(x_conv_f)[::ds]
+                    if(print_flag):
+                        disp_str = '-->j, q, res = ' + repr((j,q,resolution)) + '-Fourier_trunc==subsample_time =' + repr(np.allclose(x_conv_time_sub,x_conv))
+                        disp_str2 = '--phi_len = ' + repr(len(wavelet_filters['phi'][resolution])) + '--Max='+repr(max(S[indx,:]))
+                        print(disp_str + disp_str2)
+                    if(Q==1 and display_flag):
                         axarr[indx].plot(np.abs(x_conv_f))
                         axarr[indx].plot(mask,'k--')
                         axarr[indx].set_title('Mask Length =' + repr(sum(mask>0)))
 
                 V.append(x_conv)
                 U.append(np.abs(x_conv))
-                filtmat[indx, :] = np.abs(fft_module.ifft(x_conv_f))#without any subsampling shows dirac properly
+                filtmat[indx, :] = np.abs(fft_module.ifft(x_conv_f))
                 S1[indx, :] = _apply_lowpass(U[indx], wavelet_filters['phi'][resolution], J, window_size) 
                 
-                
-                phi_support_len = np.sum(np.abs(wavelet_filters['phi'][resolution])!=0)
-                mask_phi = np.zeros(len(wavelet_filters['phi'][resolution]))
-                mask_phi[:phi_support_len] = max(np.abs(wavelet_filters['phi'][resolution]))
-
-                if(Q==1):                    
-                    axarr2[indx].plot(wavelet_filters['phi'][resolution])
+                if(Q==1 and display_flag):
+                    phi_support_len = np.sum(np.abs(wavelet_filters['phi'][resolution])!=0)
+                    plot_xlen = max(phi_support_len, window_size)
+                    mask_phi = np.zeros((plot_xlen))
+                    mask_phi[:phi_support_len] = max(np.abs(wavelet_filters['phi'][resolution]))
+                    mask_window_size = np.zeros((plot_xlen))
+                    mask_window_size[:plot_xlen] = max(mask_phi) + 1
+                    
+                    axarr2[indx].plot(wavelet_filters['phi'][resolution][:plot_xlen])
                     axarr2[indx].plot(mask_phi,'k--')
+                    axarr2[indx].plot(mask_window_size,'r--')
                     axarr2[indx].set_title('Non-zero support of lowpass = ' + repr(phi_support_len))
                     axarr3[indx].plot(U[indx]) #plot(S1[indx, :])#
                     axarr3[indx].plot(V[indx])
@@ -565,11 +572,11 @@ def scattering(x,wavelet_filters=None,M=2):
         if(display_flag):
             plt.figure()
             plt.imshow(np.log(filtmat+1e-6),aspect='auto',cmap='jet')
-            plt.title('Filtered signal before subsampling')
+            plt.title('Filtered signal at full resolution')
 
             plt.figure()
             plt.imshow(S1, aspect='auto', cmap='jet')
-            plt.title('First Order Coeffs')    
+            plt.title('First Order Coeffs : ' + repr(S1.shape) )
             plt.xlabel('Time window')
             plt.ylabel('octave J')
             plt.colorbar()
@@ -581,7 +588,7 @@ def scattering(x,wavelet_filters=None,M=2):
         indx = 0
         for j1 in range(J):
             #pick resolution of filtered signal stored during U1 calculation.
-            current_resolution = v_resolution[j1] 
+            current_resolution = v_resolution[j1]
             for q1 in range(Q):
                 #U is in the time domain                
                 Ujq = fft_module.fft(U[j1*Q+q1])  
@@ -620,7 +627,7 @@ def get_chirp(N):
     """Create a chirp signal of length N with 0 start freq and f1 at time t1 
     """
     t = np.linspace(0, 20, N)
-    y = chirp(t, f0=0, f1=N/16, t1=N/16, method='linear')
+    y = chirp(t, f0=0, f1=10, t1=10, method='linear')
     return y
     
 def get_dirac(N, loc):
@@ -668,7 +675,7 @@ def test_scattering(bins_per_octave, quality_factor, nOctaves, N, M):
     
     #CQTs and MFCCs
     cqts = librosa.cqt(x, sr=fs)
-#    mfccs = librosa.feature.mfcc(y=y, sr=fs)
+    mfccs = librosa.feature.mfcc(y=y, sr=fs)
     
     
     if(display_flag):        
@@ -676,7 +683,7 @@ def test_scattering(bins_per_octave, quality_factor, nOctaves, N, M):
         plt.figure()
         plt.imshow(cqts, aspect='auto',origin='lower')
         plt.colorbar()
-        plt.title('Constant-Q power spectrum')
+        plt.title('Constant-Q power spectrum :' + repr(cqts.shape) )
         plt.xlabel('Time windows')
         plt.ylabel('Log Freq.')
         
@@ -686,21 +693,23 @@ def test_scattering(bins_per_octave, quality_factor, nOctaves, N, M):
         plt.xlabel('Time')
         plt.ylabel('Amplitude')
     
-#        plt.figure()
-#        plt.title('Scattering Transform')
-#        plt.xlabel('time')
-#        plt.ylabel('$\lambda$')
-#        plt.imshow(np.log2(scat+1e-6), aspect='auto', cmap='jet')#add log to scattering coefficients view better
-#        plt.colorbar()
+        plt.figure()
+        plt.title('Scattering Transform')
+        plt.xlabel('time')
+        plt.ylabel('$\lambda$')
+        plt.imshow(np.log2(scat+1e-12), aspect='auto', cmap='jet')#add log to scattering coefficients view better
+        plt.colorbar()
     
     return scat, mfccs, cqts
 
 
 
-bins_per_octave = 1
-nOctaves = 12
+bins_per_octave = 12
+nOctaves = 7
 N = 2**16
-quality_factor = 1 #this parameter is never used (remove it)
+#this factor controls the spread across two bands in frequency : 
+# at 1 the freq resolution is poor. Use at 3 or 4.
+quality_factor = 4 
 M = 1
 
 plt.close('all')
