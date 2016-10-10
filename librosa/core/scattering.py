@@ -314,7 +314,7 @@ def _morlet_1d(N, fc, den):
     f = np.arange(0, N, dtype=float) / N  
     return 2 * np.exp(- np.square(f - fc) / den).transpose()
 
-def _apply_lowpass(x, phi, J, len_x_sub):
+def _apply_lowpass(x, phi, len_x_sub):
     """Applies a low pass filter on the signal x .
     Convolution by multiplying in fourier domain.
     Subsampling in time domain to obtain the correct resolution for given 
@@ -326,9 +326,7 @@ def _apply_lowpass(x, phi, J, len_x_sub):
         Input signal in the spatial domain.
     phi : array_like
         Low pass filter in the Fourier domain.
-    J : int
-        Rate of subsampling 2**J
-    n_scat : int
+    len_x_sub : int
         number of spatial coefficients of the scattering vector
 
     Returns
@@ -343,8 +341,6 @@ def _apply_lowpass(x, phi, J, len_x_sub):
     x_sub = np.zeros((x.shape[0], len_x_sub))
     len_x = x.shape[1]
     ds = len_x//len_x_sub #eq N/2**j // N/2**(J-1) = 2**(J-1-j)
-    #factor = 2 ** (J - 1) #this is the wrong factor
-    #multiplication factor ds depends on the resolution & subsampling required
     for q in range(x.shape[0]):
         xf = fft_module.fft(x[q,:])
         x_filtered = np.abs(fft_module.ifft(xf*phi))
@@ -486,14 +482,18 @@ def scattering(x,wavelet_filters=None,M=2):
     oversample = 1  # subsample at a rate a bit lower than the critic frequency
 
     U = []
-    V = []
     v_resolution = []
     current_resolution = 0
     
     S = np.zeros((num_coefs,window_size)) #create matrix containing num_coeffs x window length 
     S_tree = {} #allows access to the coefficients (S) using the tree structure
-
-    S[0, :] = _apply_lowpass(x, wavelet_filters['phi'][current_resolution], J, window_size)[0] #first coefficient
+    
+    Xf = fft_module.fft(x) # precompute the fourier transform of the signal
+    
+    ds2 = len(Xf)//window_size
+    S[0, :] = ds2* np.abs(fft_module.ifft(Xf*wavelet_filters['phi'][current_resolution]))[::ds2]
+#    S[0, :] = _apply_lowpass(x, wavelet_filters['phi'][current_resolution], window_size)[0] #first coefficient
+    
     S_tree[0] = S[0, :]
 
     
@@ -501,9 +501,8 @@ def scattering(x,wavelet_filters=None,M=2):
         num_order1_coefs = J*Q
         S1 = S[1:J*Q+1,:].view()
         S1.shape=(num_order1_coefs,window_size)
-        Xf = fft_module.fft(x) # precompute the fourier transform of the signal
         indx = 0
-        filtmat = np.zeros((J*Q, len( wavelet_filters['psi'][(0,0)][current_resolution])))
+#        filtmat = np.zeros((J*Q, len( wavelet_filters['psi'][(0,0)][current_resolution])))
         
         if(Q==1 and display_flag): 
         #display only when Q =1 otherwise too many signals to plot    
@@ -517,39 +516,36 @@ def scattering(x,wavelet_filters=None,M=2):
         
         for j in range(J):
             resolution = max(j-oversample, 0)
-            v_resolution.append(resolution) # resolution for the next layer 
+            v_resolution.append(resolution) # resolution for the next layer
+            ds =  2**resolution
             for q in range(Q):
-                filtersjq = wavelet_filters['psi'][(j,q)][current_resolution]
+                filtersjq = wavelet_filters['psi'][(j,q)][current_resolution].view()
                 #Fourier truncate eqs subsample in time
-                ds =  2**resolution
                 x_conv_f = Xf*filtersjq
+                len_x_conv_f = len(x_conv_f)
+                x_conv_f_truncate = x_conv_f[:len_x_conv_f//ds]
+                x_conv = fft_module.ifft(x_conv_f_truncate)
+                x_conv_mod = np.abs(x_conv)
+                x_conv_mod_f = fft_module.fft(x_conv_mod)
+                ds2 = len(x_conv_mod_f)//window_size
+                S1[indx, :] = ds2* np.abs(fft_module.ifft(x_conv_mod_f*wavelet_filters['phi'][resolution]))[::ds2]
+#                S1[indx, :] = _apply_lowpass(x_conv_mod, wavelet_filters['phi'][resolution], window_size)
+#                print('ds, ds2 : '+repr((ds, ds2))+ '--' + repr(np.allclose(x_subsampled,S1[indx, :])))
                 
-                if(no_subsample_flag): 
-                    print('Use no subsampling in lowpass filter nor in signal')
-                    x_conv = fft_module.ifft(x_conv_f) 
-                    resolution = current_resolution
-                else:
-                    mask = np.zeros(x_conv_f.shape)
-                    len_x_conv_f = len(x_conv_f)
-                    mask[:len_x_conv_f//ds] = max(np.abs(x_conv_f))
-                    x_conv_f_truncate = x_conv_f[:len_x_conv_f//ds]
-                    x_conv = fft_module.ifft(x_conv_f_truncate)
+                U.append(x_conv_mod)
+                if(print_flag):
                     x_conv_time_sub = ds*fft_module.ifft(x_conv_f)[::ds]
-                    if(print_flag):
-                        disp_str = '-->j, q, res = ' + repr((j,q,resolution)) + '-Fourier_trunc==subsample_time =' + repr(np.allclose(x_conv_time_sub,x_conv))
-                        disp_str2 = '--phi_len = ' + repr(len(wavelet_filters['phi'][resolution])) + '--Max='+repr(max(S[indx,:]))
-                        print(disp_str + disp_str2)
-                    if(Q==1 and display_flag):
-                        axarr[indx].plot(np.abs(x_conv_f))
-                        axarr[indx].plot(mask,'k--')
-                        axarr[indx].set_title('Mask Length =' + repr(sum(mask>0)))
-
-                V.append(x_conv)
-                U.append(np.abs(x_conv))
-                filtmat[indx, :] = np.abs(fft_module.ifft(x_conv_f))
-                S1[indx, :] = _apply_lowpass(U[indx], wavelet_filters['phi'][resolution], J, window_size) 
-                
+                    disp_str = '-->j, q, res = ' + repr((j,q,resolution)) + '-Fourier_trunc==subsample_time =' + repr(np.allclose(x_conv_time_sub,x_conv))
+                    disp_str2 = '--phi_len = ' + repr(len(wavelet_filters['phi'][resolution])) + '--Max='+repr(max(S[indx,:]))
+                    print(disp_str + disp_str2)
+                    
                 if(Q==1 and display_flag):
+                    mask = np.zeros(x_conv_f.shape)
+                    mask[:len_x_conv_f//ds] = max(np.abs(x_conv_f))
+                    axarr[indx].plot(np.abs(x_conv_f))
+                    axarr[indx].plot(mask,'k--')
+                    axarr[indx].set_title('Mask Length =' + repr(sum(mask>0)))
+                    
                     phi_support_len = np.sum(np.abs(wavelet_filters['phi'][resolution])!=0)
                     plot_xlen = max(phi_support_len, window_size)
                     mask_phi = np.zeros((plot_xlen))
@@ -562,18 +558,14 @@ def scattering(x,wavelet_filters=None,M=2):
                     axarr2[indx].plot(mask_window_size,'r--')
                     axarr2[indx].set_title('Non-zero support of lowpass = ' + repr(phi_support_len))
                     axarr3[indx].plot(U[indx]) #plot(S1[indx, :])#
-                    axarr3[indx].plot(V[indx])
+                    axarr3[indx].plot(x_conv)
 #                    axarr3[indx].set_title('Max_val ='+repr(max(S1[indx, :])))
                 
                 indx = indx + 1
-
+        
         S_tree[1] = S1
         
         if(display_flag):
-            plt.figure()
-            plt.imshow(np.log(filtmat+1e-6),aspect='auto',cmap='jet')
-            plt.title('Filtered signal at full resolution')
-
             plt.figure()
             plt.imshow(S1, aspect='auto', cmap='jet')
             plt.title('First Order Coeffs : ' + repr(S1.shape) )
@@ -582,6 +574,8 @@ def scattering(x,wavelet_filters=None,M=2):
             plt.colorbar()
 
     if M > 1: #Second order scattering coeffs
+        #this can be speeded up by just calculating at Q=1/2 and not at the Q
+        #for the first order. This hugely reduces the number of coefficients.
         num_order2_coefs = int(J*(J-1)*Q**2/2)
         S2 = S[J*Q+1:num_coefs, :].view()  # view of the data
         S2.shape = (num_order2_coefs, window_size)
@@ -596,9 +590,10 @@ def scattering(x,wavelet_filters=None,M=2):
                     for q2 in range(Q):# TODO
                         # | U_lambda1 * Psi_j2 | * phi
                         filtersj2q2 = wavelet_filters['psi'][(j2,q2)][current_resolution].view()
-                        #why no subsampling here ?? while we do it in 1st order 
-                        x_conv = np.abs(fft_module.ifft(Ujq*filtersj2q2))               
-                        Uj2 = _apply_lowpass(x_conv, wavelet_filters['phi'][current_resolution], J,  window_size)
+                        #Subsampling is only required in order 1 to set the resolution of the signal decided by the wavelet bandpass filters 
+                        x_conv = np.abs(fft_module.ifft(Ujq*filtersj2q2))
+                        #remove apply lowpass!! no need for extra functions
+                        Uj2 = _apply_lowpass(x_conv, wavelet_filters['phi'][current_resolution], window_size)
                         if(print_flag):
                             print('j1,q1,j2,q2,res :' + repr((j1,q1,j2,q2,resolution)) + 'Uj2:'+repr(Uj2.shape) + 'x_conv=' + repr(x_conv.shape))
                         S2[indx, :] = Uj2
@@ -705,7 +700,7 @@ def test_scattering(bins_per_octave, quality_factor, nOctaves, N, M):
 
 
 bins_per_octave = 12
-nOctaves = 7
+nOctaves = 10
 N = 2**16
 #this factor controls the spread across two bands in frequency : 
 # at 1 the freq resolution is poor. Use at 3 or 4.
