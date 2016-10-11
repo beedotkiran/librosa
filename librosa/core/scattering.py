@@ -270,24 +270,21 @@ def filterbank_to_multiresolutionfilterbank(filters, max_resolution):
     keys_jq = max(list(filters['psi'].keys()))
     nOctaves = keys_jq[0] + 1 #nOctaves
     bins_per_octave = keys_jq[1] + 1#bins_per_octave
-    N = filters['psi'][(0,0)].shape[-1] #size at full resolution
+    #N = filters['psi'][(0,0)].shape[-1] #size at full resolution
 
     Phi_multires = []
     Psi_multires = {}
 
     for res in range(0,max_resolution):
-#        N0 = N/2**res
-#        Phi_multires.append(_gaussian(N0, nOctaves))
         Phi_multires.append(_get_filter_at_resolution(filters['phi'],res))
     
     for j in range(nOctaves):
         for q in range(bins_per_octave):
             key = (j,q)
             Psi_multires[key] = {}
-#            print(key)
             for res in range(0,max(j-1,0)+1):  
                 Psi_multires[key][res] = _get_filter_at_resolution(filters['psi'][key],res)
-#        print('')
+
 
     filters_multires = dict(phi=Phi_multires, psi=Psi_multires)
     
@@ -448,10 +445,14 @@ def scattering(x,wavelet_filters=None,wavelet_filters_order2=None,M=2):
 
     """
     
+    if(not _ispow2(len(x))):
+        max_J = int(np.ceil(np.log2(len(x))))
+        x = np.append(x, np.zeros(2**max_J-len(x)))
+        
     if(wavelet_filters==None):#build filters 
         N = len(x)        
-        nOctaves = 7 #int(np.log2(len(x)))-1
-        bins_per_octave = 12 #defaults 
+        bins_per_octave = [12, 1]
+        nOctaves = 10
         quality_factor = 4 #defaults
         
         psi_specs_order = get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves)
@@ -474,8 +475,12 @@ def scattering(x,wavelet_filters=None,wavelet_filters_order2=None,M=2):
     keys_jq = max(list(wavelet_filters['psi'].keys()))
     J = keys_jq[0] + 1 
     Q = keys_jq[1] + 1
-    keys_jq_order2 = max(list(wavelet_filters_order2['psi'].keys()))
-    Q2 = keys_jq_order2[1] + 1
+    #for second order    
+    if(M==2):
+        keys_jq_order2 = max(list(wavelet_filters_order2['psi'].keys()))
+        Q2 = keys_jq_order2[1] + 1
+    else:
+        Q2 = Q
     
     num_coefs = {
         0: int(1),
@@ -506,7 +511,7 @@ def scattering(x,wavelet_filters=None,wavelet_filters_order2=None,M=2):
     S[0, :] = ds2* np.abs(fft_module.ifft(Xf*wavelet_filters['phi'][current_resolution]))[::ds2]
 #    S[0, :] = _apply_lowpass(x, wavelet_filters['phi'][current_resolution], window_size)[0] #first coefficient
     
-    S_tree[0] = S[0, :]
+    S_tree[0] = S[0, :].view()
 
     
     if M > 0: #First order scattering coeffs
@@ -514,7 +519,6 @@ def scattering(x,wavelet_filters=None,wavelet_filters_order2=None,M=2):
         S1 = S[1:J*Q+1,:].view()
         S1.shape=(num_order1_coefs,window_size)
         indx = 0
-#        filtmat = np.zeros((J*Q, len( wavelet_filters['psi'][(0,0)][current_resolution])))
         
         if(Q==1 and display_flag): 
         #display only when Q =1 otherwise too many signals to plot    
@@ -575,7 +579,7 @@ def scattering(x,wavelet_filters=None,wavelet_filters_order2=None,M=2):
                 
                 indx = indx + 1
         
-        S_tree[1] = S1
+        S_tree[1] = S1.view()
         
         if(display_flag):
             plt.figure()
@@ -666,36 +670,41 @@ def test_scattering(bins_per_octave, quality_factor, nOctaves, N, M):
     
     # uncomment to test chirp and dirac signals
     (y, fs) = get_audio_test()
-    y = get_dirac(N, int(N/8))
+#    y = get_dirac(N, int(N/8))
 #    y = get_chirp(N)
 #    y, fs = librosa.load(librosa.util.example_audio_file())
-       
-    x = np.zeros(shape=(N))
-    x = y[0:N]
+    x = y
+    
+    if(not _ispow2(len(x))):
+        max_J = int(np.ceil(np.log2(len(x))))
+        x = np.append(x, np.zeros(2**max_J-len(x)))
+    
+    N = len(x)
+#    x = np.zeros(shape=(N))
+#    x = y[0:N]
     
     assert(nOctaves < np.log2(N))
     
     #scattering transform
-    psi_specs_all = get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves)
-    psi_specs,_,_ = psi_specs_all[0]
-    filters, _ = filterbank_morlet_1d(N, psi_specs, nOctaves)
-    wavelet_filters = filterbank_to_multiresolutionfilterbank(filters, nOctaves)
-    if(M==2):
-        psi_specs_order2,_,_ = psi_specs_all[1]
-        filters, _ = filterbank_morlet_1d(N, psi_specs_order2, nOctaves)
-        wavelet_filters_order2 = filterbank_to_multiresolutionfilterbank(filters, nOctaves)
-    else:
-        wavelet_filters_order2 = None
+#    psi_specs_all = get_wavelet_filter_specs(bins_per_octave, quality_factor, nOctaves)
+#    psi_specs,_,_ = psi_specs_all[0]
+#    filters, _ = filterbank_morlet_1d(N, psi_specs, nOctaves)
+#    wavelet_filters = filterbank_to_multiresolutionfilterbank(filters, nOctaves)
+#    if(M==2):
+#        psi_specs_order2,_,_ = psi_specs_all[1]
+#        filters, _ = filterbank_morlet_1d(N, psi_specs_order2, nOctaves)
+#        wavelet_filters_order2 = filterbank_to_multiresolutionfilterbank(filters, nOctaves)
+#    else:
+#        wavelet_filters_order2 = None
         
-    scat,u,scat_tree = scattering(x, wavelet_filters=wavelet_filters, wavelet_filters_order2=wavelet_filters_order2, M=M)
-    coef_index, spatial = scat.shape
+    scat,u,scat_tree = scattering(x, wavelet_filters=None, wavelet_filters_order2=None, M=M)
+    coef_index, spatial = scat.shape    
     
-    #CQTs and MFCCs
-    cqts = librosa.cqt(x, sr=fs)
-    mfccs = librosa.feature.mfcc(y=y, sr=fs)
-    
-    
-    if(display_flag):        
+    if(display_flag):
+        #CQTs and MFCCs
+        cqts = librosa.cqt(x, sr=fs)
+        mfccs = librosa.feature.mfcc(y=y, sr=fs)
+        
         #Librosa's Constant Q Transform 
         plt.figure()
         plt.imshow(cqts, aspect='auto',origin='lower')
@@ -717,19 +726,17 @@ def test_scattering(bins_per_octave, quality_factor, nOctaves, N, M):
         plt.imshow(np.log2(scat+1e-12), aspect='auto', cmap='jet')#add log to scattering coefficients view better
         plt.colorbar()
     
-    return scat, mfccs, cqts
+    return scat
 
 
 
-bins_per_octave = []
-bins_per_octave.append(12)
-bins_per_octave.append(1)
+bins_per_octave = [12, 1]
 nOctaves = 10
 N = 2**16
 #this factor controls the spread across two bands in frequency : 
 # at 1 the freq resolution is poor. Use at 3 or 4.
 quality_factor = 4 
-M = 2
+M = 1
 
 plt.close('all')
 
@@ -749,6 +756,6 @@ no_subsample_flag = 0
 #psi_specs = get_wavelet_filter_specs(bins_per_octave, 1, nOctaves)
 #filters, lp = filterbank_morlet_1d(N, psi_specs, nOctaves)
 #wavelet_filters = filterbank_to_multiresolutionfilterbank(filters, nOctaves)
-scat, mfccs, cqts = test_scattering(**test_args)
+scat = test_scattering(**test_args)
 
             
