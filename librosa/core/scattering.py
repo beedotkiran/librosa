@@ -394,7 +394,9 @@ def scattering(x,wavelet_filters=None,wavelet_filters_order2=None,M=2):
             IEEE Transactions on Signal Processing 2014 
     .. [2] Bruna, J., Mallat, S. 'Invariant Scattering Convolutional Networks'. 
             IEEE Transactions on PAMI, 2012.
-
+    Examples
+    --------
+    
     """
     
     if(not _ispow2(len(x))):
@@ -620,9 +622,23 @@ def test_scattering(nfo, quality_factor, nOctaves, N, M):
     N = len(y)
     
     assert(nOctaves < np.log2(N))
-            
-    scat,u,scat_tree = scattering(y, wavelet_filters=None, \
-                        wavelet_filters_order2=None, M=M)
+    
+    #create wavelet filters
+    psi_specs_order = get_wavelet_filter_specs(nfo, \
+                            quality_factor, nOctaves)
+    psi_specs, _, _ = psi_specs_order[0] 
+    filters, _ = filterbank_morlet_1d(N, psi_specs, nOctaves)
+    wavelet_filters = filterbank_to_multiresolutionfilterbank(filters, nOctaves)
+    if(M==2):
+        psi_specs_2, _, _ = psi_specs_order[1]
+        filters_order2, _ = filterbank_morlet_1d(N, psi_specs_2, nOctaves)
+        wavelet_filters_order2 = \
+        filterbank_to_multiresolutionfilterbank(filters_order2, nOctaves)        
+    else:
+        wavelet_filters_order2 = None
+        
+    scat,u,scat_tree = scattering(y, wavelet_filters=wavelet_filters, \
+                        wavelet_filters_order2=wavelet_filters_order2, M=M)
     coef_index, spatial = scat.shape    
     
     if(display_flag):
